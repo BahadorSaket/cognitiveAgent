@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+     <script type="text/javascript" src="SpreadingActivation.js"></script>
+      <script type="text/javascript" src="Visualizer.js"></script>
+     <script src="http://d3js.org/d3.v3.min.js"></script>
+     <script src="http://labratrevenge.com/d3-tip/javascripts/d3.tip.v0.6.3.js"></script>
+     <script type="text/javascript" src="http://code.jquery.com/jquery-2.1.4.min.js"></script>
+     <script src="https://npmcdn.com/nlp_compromise@latest/builds/nlp_compromise.min.js"></script>
+    <script src="main.js"></script>
+    <script src="addNodeToModel.js"></script>
+    <link href="Style.css" rel="stylesheet">
+</head>
+<body>
+    <div id="Search">
+      <p id="panelTitle">Model Configuration</p>
+      <div class="configuration">
+        <select id='configuration' style="width:99%;">
+                 <option value='Combine'>Expert User</option>
+                 <option value='simple'>Non-Expert User</option>
+        </select>
+      </div>
+      <p id="panelTitle">Update The Model</p>
+      <div>
+        <div style="font-size:12px; align-items: center; color:blue; ">
+        <span id="notification" > Say something to me. E.g., Germany is a good team.</span>
+        </div>
+        <div id="info">
+        </div>
+        <div class="right">
+          <button id="start_button" onclick="startButton(event)">
+            <img id="start_img" src="mic.gif" alt="Start"></button>
+          </div>
+          <div id="results">
+            <span id="final_span" class="final"></span>
+            <span id="interim_span" class="interim"></span>
+          </div>
+          <div class="center">
+            <div id="div_language">
+              <select id="select_language" onchange="updateCountry()"></select>
+              <select id="select_dialect"></select>
+            </div>
+          </div>
+        </div>
+      <p id="panelTitle">Select Two Teams</p>
+      <div class="dropdownMenuContainer">
+
+           <div class="dorpdownMenu">
+               <select id='team1' style="width:45%;">
+               </select>
+               <span> vs. </span>
+               <select id='team2' style="width:45%;">
+               </select>
+           </div>
+           <p id="panelTitle">Analytical Process</p>
+           <div class="process">
+             <div class="team1">
+             </div>
+           </br>
+             <div class="team2">
+             </div>
+           </div>
+           <div>
+             <button id="learn" type="button" style="float:right; margin:0px;">Learn</button>
+             <p id="panelTitle">User's Prediction Result</p>
+           </div>
+
+
+           <div>
+             <div id="realPrediction">
+             </div>
+           </div>
+
+           <p id="panelTitle">Model's Prediction Result</p>
+           <div class="prediction">
+           </div>
+      </div>
+    </div>
+    <div id="Vis"> </div>
+</body>
+
+
+<script>
+
+  var langs =
+[['Afrikaans',      ['af-ZA']],
+['English',        ['en-AU', 'Australia'],
+                   ['en-CA', 'Canada'],
+                   ['en-IN', 'India'],
+                   ['en-NZ', 'New Zealand'],
+                   ['en-ZA', 'South Africa'],
+                   ['en-GB', 'United Kingdom'],
+                   ['en-US', 'United States']],
+['Lingua latīna',   ['la']]];
+
+    for (var i = 0; i < langs.length; i++) {
+      select_language.options[i] = new Option(langs[i][0], i);
+    }
+    select_language.selectedIndex = 1;
+    updateCountry();
+    select_dialect.selectedIndex = 6;
+    showInfo('info_start');
+    function updateCountry() {
+    for (var i = select_dialect.options.length - 1; i >= 0; i--) {
+      select_dialect.remove(i);
+    }
+    var list = langs[select_language.selectedIndex];
+    for (var i = 1; i < list.length; i++) {
+      select_dialect.options.add(new Option(list[i][1], list[i][0]));
+    }
+    select_dialect.style.visibility = list[1].length == 1 ? 'hidden' : 'visible';
+    }
+    var create_email = false;
+    var final_transcript = '';
+    var recognizing = false;
+    var ignore_onend;
+    var start_timestamp;
+    if (!('webkitSpeechRecognition' in window)) {
+    upgrade();
+    } else {
+    start_button.style.display = 'inline-block';
+    var recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = function() {
+      recognizing = true;
+      showInfo('info_speak_now');
+      start_img.src = 'mic-animate.gif';
+    };
+    recognition.onerror = function(event) {
+      if (event.error == 'no-speech') {
+        start_img.src = 'mic.gif';
+        showInfo('info_no_speech');
+        ignore_onend = true;
+      }
+      if (event.error == 'audio-capture') {
+        start_img.src = 'mic.gif';
+        showInfo('info_no_microphone');
+        ignore_onend = true;
+      }
+      if (event.error == 'not-allowed') {
+        if (event.timeStamp - start_timestamp < 100) {
+          showInfo('info_blocked');
+        } else {
+          showInfo('info_denied');
+        }
+        ignore_onend = true;
+      }
+    };
+    recognition.onend = function() {
+      recognizing = false;
+      if (ignore_onend) {
+        return;
+      }
+      start_img.src = 'mic.gif';
+      if (!final_transcript) {
+        showInfo('info_start');
+        return;
+      }
+      showInfo('');
+      if (window.getSelection) {
+        window.getSelection().removeAllRanges();
+        var range = document.createRange();
+        range.selectNode(document.getElementById('final_span'));
+        window.getSelection().addRange(range);
+      }
+      if (create_email) {
+        create_email = false;
+        createEmail();
+      }
+      sendMessage(final_transcript);
+      //console.log(final_transcript);
+    };
+    recognition.onresult = function(event) {
+      var interim_transcript = '';
+      for (var i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          final_transcript += event.results[i][0].transcript;
+        } else {
+          interim_transcript += event.results[i][0].transcript;
+        }
+      }
+      final_transcript = capitalize(final_transcript);
+
+      final_span.innerHTML = linebreak(final_transcript);
+      interim_span.innerHTML = linebreak(interim_transcript);
+
+      if (final_transcript || interim_transcript) {
+        showButtons('inline-block');
+      }
+    };
+    }
+    function upgrade() {
+    start_button.style.visibility = 'hidden';
+    showInfo('info_upgrade');
+    }
+    var two_line = /\n\n/g;
+    var one_line = /\n/g;
+    function linebreak(s) {
+    return s.replace(two_line, '<p></p>').replace(one_line, '<br>');
+    }
+    var first_char = /\S/;
+    function capitalize(s) {
+    return s.replace(first_char, function(m) { return m.toUpperCase(); });
+    }
+    function createEmail() {
+    var n = final_transcript.indexOf('\n');
+    if (n < 0 || n >= 80) {
+      n = 40 + final_transcript.substring(40).indexOf(' ');
+    }
+    var subject = encodeURI(final_transcript.substring(0, n));
+    var body = encodeURI(final_transcript.substring(n + 1));
+    window.location.href = 'mailto:?subject=' + subject + '&body=' + body;
+    }
+
+    function startButton(event) {
+        if (recognizing) {
+          recognition.stop();
+          return;
+        }
+        final_transcript = '';
+        recognition.lang = select_dialect.value;
+        recognition.start();
+        ignore_onend = false;
+        final_span.innerHTML = '';
+        interim_span.innerHTML = '';
+        start_img.src = 'mic-slash.gif';
+        showInfo('info_allow');
+        showButtons('none');
+        start_timestamp = event.timeStamp;
+    }
+    function showInfo(s) {
+        if (s) {
+          for (var child = info.firstChild; child; child = child.nextSibling) {
+            if (child.style) {
+              child.style.display = child.id == s ? 'inline' : 'none';
+            }
+          }
+          info.style.visibility = 'visible';
+        } else {
+          info.style.visibility = 'hidden';
+        }
+        }
+        var current_style;
+        function showButtons(style) {
+        if (style == current_style) {
+          return;
+        }
+        current_style = style;
+    }
+    function sendMessage(message)
+    {
+
+      console.log(message);
+      var obj = {"data": message};
+      $.ajax({
+        type: "POST",
+        url: "http://localhost:3001/receiver",
+        dataType: 'json',
+        data: JSON.stringify(obj),
+        contentType: "application/json",
+        success: function(dataModel){
+            console.log("reply:", dataModel);
+            if(dataModel.hiddenNode!="nothing" && dataModel.teamNode!="nothing" && dataModel.finalNode!="nothing")
+            {
+              $("#notification").empty();
+              console.log("got it here !!!");
+              addNodeToModel(dataModel);
+            }
+            else if(dataModel.hiddenNode=="nothing" && dataModel.teamNode!="nothing")
+            {
+                $("#notification").empty();
+                $("#notification").text("What is new about " + dataModel.teamNode +"'s team?");
+
+            }
+            else if(dataModel.hiddenNode=="nothing" && dataModel.teamNode=="nothing"){
+              $("#notification").empty();
+              $("#notification").text("I cannot update my model based on what you just said! ");
+            }
+            else if(dataModel.hiddenNode!="nothing" && dataModel.teamNode=="nothing"){
+              $("#notification").empty();
+              $("#notification").text("Please give me an information about an European national team! ");
+            }
+
+        },
+        error: function(err){
+          console.error(err);
+        }
+      });
+
+
+    }
+
+/*
+team1= "France", team2="Iceland";
+$(".team1").append('<span style="font-family:Arial; font-size:12px; font-weight: bold;">'+ team1+' </span></br>');
+$(".team2").append('<span style="font-family:Arial; font-size:12px; font-weight: bold;">'+ team2+' </span></br>');
+
+*/
+EuropeanTeam = ["Switzerland","France","Romania","Albania","Russia","Wales","Slovakia","England","Ukraine",
+                "Poland", "Germany", "Northern Ireland", "Czech Republic","Turkey", "Croatia", "Spain", "Sweden", "Sweden",
+                "Spain", "Belgium", "Iceland", "Austria", "Hungary","Portugal" ,"Italy" ,"Ireland"];
+
+var obj= [];
+for(i=0;i<EuropeanTeam.length;i++)
+{
+    obj.push({"Key":EuropeanTeam[i], "Positive": 0, "Negative":0});
+    console.log("object is called");
+}
+
+
+function doWeighting(team1, team2, result)
+{
+  if(result=="draw")
+  {
+    if(team2_Weighting > team1_Weighting)
+    {
+      for(j=0;j<obj.length;j++)
+      {
+        if(obj[j].Key == team2)
+        {
+          obj[j].Negative = obj[j].Negative +alpha;
+          //console.log(obj[j].Key,obj[j].Negative );
+        }
+      }
+    }
+    else if(team2_Weighting < team1_Weighting) {
+      for(j=0;j<obj.length;j++)
+      {
+        if(obj[j].Key == team1)
+        {
+          obj[j].Negative = obj[j].Negative +alpha;
+        //  console.log(obj[j].Key,obj[j].Negative );
+        }
+      }
+    }
+  }
+  else
+  {
+    //console.log()
+    for(j=0;j<obj.length;j++)
+    {
+      if(obj[j].Key == result)
+      {
+        obj[j].Negative = obj[j].Negative +alpha;
+      //  console.log(obj[j].Key,obj[j].Negative );
+      }
+    }
+  }
+
+}
+
+function checkRealPrediction(team1, team2, result)
+{
+
+  alpha =0.1;
+  for(i=0;i<UserPrediction.length;i++)
+  {
+    if(team1 == UserPrediction[i].Team1)
+    {
+      if(UserPrediction[i].Team2 == team2)
+      {
+        if(UserPrediction[i].Results!=result)
+        {
+          doWeighting(team1, team2, result);
+        }
+      }
+    }
+    else if(UserPrediction[i].Team2 == team1)
+    {
+      if(UserPrediction[i].Team1 == team2)
+      {
+        if(UserPrediction[i].Results!=result)
+        {
+          doWeighting(team1, team2, result);
+        }
+      }
+    }
+
+
+  }
+}
+
+$( "#learn").click(function() {
+     if(team1_Weighting > team2_Weighting && (team1_Weighting - team2_Weighting) > 0.2)
+     {
+       checkRealPrediction(team1, team2, team1);
+     }
+     else if(team1_Weighting < team2_Weighting && (team2_Weighting - team1_Weighting) > 0.2)
+     {
+       checkRealPrediction(team1, team2, team2);
+     }
+     else {
+       checkRealPrediction(team1, team2, "draw");
+     }
+});
+
+
+
+$("#team1").change(function() {
+    team1 = $('#team1 option:selected').text();
+    cleanTheShit();
+    setTimeout(function(){     run(dataset);}, 100);
+});
+
+$("#team2").change(function() {
+    team2 = $("#team2 option:selected").text();
+    cleanTheShit();
+    setTimeout(function(){     run(dataset);}, 100);
+
+});
+
+$( "#configuration" ).change(function() {
+  dataset = mainProgram();
+  width= $("#Vis").width()-10;
+  height= $("#Vis").height()-10;
+  force = d3.layout.force().charge(-500).linkDistance(30).size([width, height]);
+  force.nodes(dataset.nodes)
+       .links(dataset.links)
+       .start();
+    cleanTheShit();
+  setTimeout(function(){     run(dataset);}, 100);
+});
+
+// sends the data for visualization
+dataset = mainProgram();
+width= $("#Vis").width()-10;
+height= $("#Vis").height()-10;
+force = d3.layout.force().charge(-500).linkDistance(30).size([width, height]);
+force.nodes(dataset.nodes)
+     .links(dataset.links)
+     .start();
+
+
+setTimeout(function(){     run(dataset);}, 100);
+
+</script>
+</html>
